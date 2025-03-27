@@ -20,6 +20,7 @@ set(${PROJECT_NAME}_VERSION "${${PROJECT_NAME}_VERSION_MAJOR}.${${PROJECT_NAME}_
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
 # Dependencies
+set(CMAKE_MODULE_PATH "/opt/spack/opt/spack/linux-almalinux9-x86_64/gcc-11.3.1/pandorapfa-4.8.1-lnq2xrwhmmjsd4hpwetkwsf55rjwbu53/cmakemodules")
 include(PandoraCMakeSettings)
 
 # Prefer local include directory to any paths to installed header files
