@@ -63,17 +63,22 @@ ConeClusteringAlgorithm::ConeClusteringAlgorithm() :
 
 StatusCode ConeClusteringAlgorithm::Run()
 {
+
+    std::cout << "In Run() of ConeClusteringAlgorithm" << std::endl;
+
     m_firstLayer = (PandoraContentApi::GetPlugins(*this)->GetPseudoLayerPlugin()->GetPseudoLayerAtIp());
 
     const CaloHitList *pCaloHitList = nullptr;
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetCurrentList(*this, pCaloHitList));
 
-    if (pCaloHitList->empty())
+    if (pCaloHitList->empty()) {
+        std::cout << "GP ERROR: Calo hit list is empty! No clustering done in this call." << std::endl;
         return STATUS_CODE_SUCCESS;
-
+    }
     const TrackList *pTrackList = nullptr;
-    if (0 != m_clusterSeedStrategy)
+    if (0 != m_clusterSeedStrategy) {
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetCurrentList(*this, pTrackList));
+    }
 
     this->InitializeKDTrees(pTrackList,pCaloHitList);
 
@@ -86,11 +91,14 @@ StatusCode ConeClusteringAlgorithm::Run()
 
     // do the clustering
     m_hitsToClusters.clear();
+    // I think first ordered by pseudoLayer
     for (OrderedCaloHitList::const_iterator iter = orderedCaloHitList.begin(), iterEnd = orderedCaloHitList.end(); iter != iterEnd; ++iter)
     {
         const unsigned int pseudoLayer(iter->first);
+        // std::cout << "PseudoLayer: " << pseudoLayer << std::endl;
         CaloHitVector relevantCaloHits;
 
+        // then ordered by hits in the layer, I assume
         for (CaloHitList::const_iterator hitIter = iter->second->begin(), hitIterEnd = iter->second->end(); hitIter != hitIterEnd; ++hitIter)
         {
             const CaloHit *const pCaloHit = *hitIter;
@@ -100,10 +108,15 @@ StatusCode ConeClusteringAlgorithm::Run()
                 (PandoraContentApi::IsAvailable(*this, pCaloHit)))
             {
                 relevantCaloHits.push_back(pCaloHit);
+                // std::cout << "Found a relevant calo hit!" << std::endl;
             }
+            // else {
+            //     std::cout << "Discarding calo hit." << std::endl;
+            // }
         }
 
         ClusterFitResultMap clusterFitResultMap;
+        // below seems to be an intiial clustering fit, without any consideration of tracks, filled to clusterFitResultMap
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetCurrentClusterFitResults(clusterVector, clusterFitResultMap));
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->FindHitsInPreviousLayers(pseudoLayer, relevantCaloHits, clusterFitResultMap, clusterVector));
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->FindHitsInSameLayer(pseudoLayer, relevantCaloHits, clusterFitResultMap, clusterVector));
@@ -149,8 +162,13 @@ StatusCode ConeClusteringAlgorithm::InitializeKDTrees(const TrackList *const pTr
 
 StatusCode ConeClusteringAlgorithm::SeedClustersWithTracks(const TrackList *const pTrackList, ClusterVector &clusterVector)
 {
+
+    // std::cout << "In SeedClustersWithTracks" << std::endl;
+
     if (0 == m_clusterSeedStrategy)
         return STATUS_CODE_SUCCESS;
+
+    int canFormPFOInEvent = 0;
 
     // if we are known to be seeding with tracks we must have a track list
     if (nullptr == pTrackList)
@@ -162,6 +180,8 @@ StatusCode ConeClusteringAlgorithm::SeedClustersWithTracks(const TrackList *cons
 
         if (!pTrack->CanFormPfo())
             continue;
+
+        canFormPFOInEvent += 1;
 
         bool useTrack(false);
 
@@ -183,7 +203,12 @@ StatusCode ConeClusteringAlgorithm::SeedClustersWithTracks(const TrackList *cons
             clusterVector.push_back(pCluster);
             m_tracksToClusters.emplace(pTrack,pCluster);
         }
+        else { 
+            std::cout << "GP ERROR: useTrack = false! This shouldn't be happening with cluster seed strategy = 2" << std::endl; // I never see this. Good!
+        }
     }
+
+    std::cout << "Number of tracks that can form a PFO found: " << canFormPFOInEvent << std::endl;
 
     return STATUS_CODE_SUCCESS;
 }
@@ -192,11 +217,16 @@ StatusCode ConeClusteringAlgorithm::SeedClustersWithTracks(const TrackList *cons
 
 StatusCode ConeClusteringAlgorithm::GetCurrentClusterFitResults(const ClusterVector &clusterVector, ClusterFitResultMap &clusterFitResultMap) const
 {
-    if (!clusterFitResultMap.empty())
-        return STATUS_CODE_INVALID_PARAMETER;
 
+    // std::cout << "In GetCurrentClusterFitResults" << std::endl;
+
+    if (!clusterFitResultMap.empty()) {
+        std::cout << "GP ERROR: Found something in clusterFitResultMap! Not sure what will happen now." << std::endl;
+        return STATUS_CODE_INVALID_PARAMETER;
+    }
     for (ClusterVector::const_iterator iter = clusterVector.begin(), iterEnd = clusterVector.end(); iter != iterEnd; ++iter)
     {
+        // std::cout << "Looping over cluster! This shouldn't be happening if there is no track that can form a PFO!" << std::endl; warning, this prints out many many times
         const Cluster *const pCluster = *iter;
         ClusterFitResult clusterFitResult;
 
@@ -205,13 +235,15 @@ StatusCode ConeClusteringAlgorithm::GetCurrentClusterFitResults(const ClusterVec
             const unsigned int innerLayer(pCluster->GetInnerPseudoLayer());
             const unsigned int outerLayer(pCluster->GetOuterPseudoLayer());
             const unsigned int nLayersSpanned(outerLayer - innerLayer);
+            // std::cout << "number of layers spanned: " << nLayersSpanned << std::endl;
 
-            if (nLayersSpanned > m_nLayersSpannedForFit)
+            if (nLayersSpanned > m_nLayersSpannedForFit) // default value: 6 layers. Not sure if this is small or large.
             {
                 unsigned int nLayersToFit(m_nLayersToFit);
 
                 if (pCluster->GetMipFraction() - m_nLayersToFitLowMipCut < std::numeric_limits<float>::epsilon())
-                    nLayersToFit *= m_nLayersToFitLowMipMultiplier;
+                    nLayersToFit *= m_nLayersToFitLowMipMultiplier; // muliply the number of fit layers by two if the MIP fraction is low. Default cut is @ 0.5
+                    // MIP Fraction: fraction of energy compared to some MIP value? Why would we fit more layers for lower MIP, rather than less?
 
                 const unsigned int startLayer( (nLayersSpanned > nLayersToFit) ? (outerLayer - nLayersToFit) : innerLayer);
                 (void) ClusterFitHelper::FitLayerCentroids(pCluster, startLayer, outerLayer, clusterFitResult);
@@ -250,26 +282,35 @@ StatusCode ConeClusteringAlgorithm::GetCurrentClusterFitResults(const ClusterVec
 StatusCode ConeClusteringAlgorithm::FindHitsInPreviousLayers(unsigned int pseudoLayer, const CaloHitVector &relevantCaloHits,
     const ClusterFitResultMap &clusterFitResultMap, ClusterVector & /*clusterVector*/)
 {
+    // TODO: this seems to change when ConeClustering is recalled after a successful run. BUG?
     const float maxTrackSeedSeparation = std::sqrt(m_maxTrackSeedSeparation2);
+
+    // std::cout << "maxTrackSeedSeparation: " << maxTrackSeedSeparation << std::endl; 
 
     std::vector<HitKDNode> found_hits;
     std::vector<TrackKDNode> found_tracks;
     ClusterSet nearby_clusters;
 
-    for (const CaloHit *const pCaloHit : relevantCaloHits)
+    for (const CaloHit *const pCaloHit : relevantCaloHits) // loop over relevant Calo hits. What happened to the initially fit clusters?? Starting from hits again?
     {
-        if (!PandoraContentApi::IsAvailable(*this, pCaloHit))
+        if (!PandoraContentApi::IsAvailable(*this, pCaloHit)) {
+            std::cout << "GP ERROR: Hit is not available! Not sure what will happen." << std::endl;
             continue;
-
+        }
         const float additionalPadWidths = ((PandoraContentApi::GetGeometry(*this)->GetHitTypeGranularity(pCaloHit->GetHitType()) <= FINE) ?
             m_additionalPadWidthsFine * pCaloHit->GetCellLengthScale() : m_additionalPadWidthsCoarse * pCaloHit->GetCellLengthScale());
         const float largestAllowedDistanceForSearch = std::max(maxTrackSeedSeparation, m_maxClusterDirProjection + additionalPadWidths);
+        // maxTrackSeedSeparation default: 250 mm (unit?), m_maxClusterDirProjection default: 200 (mm?) 
+
+        if (largestAllowedDistanceForSearch != maxTrackSeedSeparation) {
+            // std::cout << "GP MESSAGE: additional pad widths are relevant - the search cone is now " << largestAllowedDistanceForSearch << std::endl;
+        }
 
         const Cluster *pBestCluster = nullptr;
         float bestClusterEnergy(0.f);
-        float smallestGenericDistance(m_genericDistanceCut);
+        float smallestGenericDistance(m_genericDistanceCut); // looks to be 1 mm?
         const unsigned int layersToStepBack((PandoraContentApi::GetGeometry(*this)->GetHitTypeGranularity(pCaloHit->GetHitType()) <= FINE) ?
-            m_layersToStepBackFine : m_layersToStepBackCoarse);
+            m_layersToStepBackFine : m_layersToStepBackCoarse); // both 3 layers by default
 
         // Associate with existing clusters in stepBack layers. If stepBackLayer == pseudoLayer, will examine track projections
         for (unsigned int stepBackLayer = 1; (stepBackLayer <= layersToStepBack) && (stepBackLayer <= pseudoLayer); ++stepBackLayer)
@@ -280,10 +321,14 @@ StatusCode ConeClusteringAlgorithm::FindHitsInPreviousLayers(unsigned int pseudo
             // goal -> determine search distances for KD-tree from cut values and associated scalings
             // search for tracks that would satisfy the search criteria in GetGenericDistanceToHit()
             KDTreeCube searchRegionTks = build_3d_kd_search_region(pCaloHit, largestAllowedDistanceForSearch, largestAllowedDistanceForSearch, largestAllowedDistanceForSearch);
-            m_tracksKdTree.search(searchRegionTks,found_tracks);
+            m_tracksKdTree.search(searchRegionTks,found_tracks); // I suppose this finds tracks
+            int nFoundTrks = 0;
             for (auto &track : found_tracks )
             {
+                nFoundTrks +=1 ;
+                // std::cout << "Found a track. Number times it's been hit for this relevant calo hit: " << nFoundTrks << std::endl;
                 auto assc_cluster = m_tracksToClusters.find(track.data);
+                // below skips if there is no cluster associated to that track
                 if (assc_cluster != m_tracksToClusters.end())
                 {
                     nearby_clusters.insert(assc_cluster->second);
@@ -318,6 +363,8 @@ StatusCode ConeClusteringAlgorithm::FindHitsInPreviousLayers(unsigned int pseudo
 
                 PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_UNCHANGED, !=, this->GetGenericDistanceToHit(pCluster,
                     pCaloHit, searchLayer, clusterFitResultMap, genericDistance));
+
+                // std::cout << "This is the distance now: " << genericDistance << std::endl;
 
                 if ((genericDistance < smallestGenericDistance) ||
                     ((genericDistance == smallestGenericDistance) && (clusterEnergy > bestClusterEnergy)))
@@ -354,6 +401,8 @@ StatusCode ConeClusteringAlgorithm::FindHitsInSameLayer(unsigned int pseudoLayer
     const ClusterFitResultMap &clusterFitResultMap, ClusterVector &clusterVector)
 {
     const float maxTrackSeedSeparation = std::sqrt(m_maxTrackSeedSeparation2);
+
+    // std::cout << "Printing maxTrackSeedSeparation: " << maxTrackSeedSeparation << std::endl;
 
     //keep a list of available hits with the most energetic available hit at the back
     std::list<unsigned> available_hits_in_layer;
@@ -395,6 +444,8 @@ StatusCode ConeClusteringAlgorithm::FindHitsInSameLayer(unsigned int pseudoLayer
 
                 const float track_search_width = maxTrackSeedSeparation;
                 const float hit_search_width = pad_search_width;
+
+                // std::cout << "Printing hit_search_width: " << hit_search_width << std::endl;
 
                 const Cluster *pBestCluster = nullptr;
                 float bestClusterEnergy(0.f);
@@ -529,11 +580,14 @@ StatusCode ConeClusteringAlgorithm::GetGenericDistanceToHit(const Cluster *const
         const TrackState &trackState(pCluster->GetTrackSeed()->GetTrackStateAtCalorimeter());
         const CartesianVector trackDirection(trackState.GetMomentum().GetUnitVector());
 
-        if (pCaloHit->GetExpectedDirection().GetCosOpeningAngle(trackDirection) < m_minHitTrackCosAngle)
+        if (pCaloHit->GetExpectedDirection().GetCosOpeningAngle(trackDirection) < m_minHitTrackCosAngle) {
+            std::cout << "GP ERROR: Cluster skipped due to cos opening angle of track being inconsistent. This shouldn't be happening (default minimum requirement is 0.)" << std::endl;
             return STATUS_CODE_UNCHANGED;
-
+        }
         return this->GetConeApproachDistanceToHit(pCaloHit, trackState.GetPosition(), trackDirection, genericDistance);
     }
+
+    // std::cout << "How often is this actually getting past the first if?" << std::endl;
 
     // Check that cluster is occupied in the searchlayer and is reasonably compatible with calo hit
     OrderedCaloHitList::const_iterator clusterHitListIter = pCluster->GetOrderedCaloHitList().find(searchLayer);
@@ -608,8 +662,9 @@ StatusCode ConeClusteringAlgorithm::GetGenericDistanceToHit(const Cluster *const
     // Seed track distance measurements
     if (useTrackSeed && !followInitialDirection)
     {
+        // std::cout << "How often are we getting to this track seed?" << std::endl;
         StatusCode trackStatusCode = this->GetDistanceToTrackSeed(pCluster, pCaloHit, searchLayer, trackSeedDistance);
-
+        // std::cout << "Track seed distance: " << trackSeedDistance << std::endl;
         if (STATUS_CODE_SUCCESS == trackStatusCode)
         {
             if (trackSeedDistance < m_genericDistanceCut)
@@ -619,6 +674,10 @@ StatusCode ConeClusteringAlgorithm::GetGenericDistanceToHit(const Cluster *const
         {
             return trackStatusCode;
         }
+    }
+
+    if (std::min(trackSeedDistance, std::min(initialDirectionDistance, currentDirectionDistance)) ==  trackSeedDistance) {
+        // std::cout << "trackSeedDistance is being returned! This is probably good news?" << std::endl;
     }
 
     // Identify best measurement of generic distance
@@ -711,10 +770,25 @@ StatusCode ConeClusteringAlgorithm::GetConeApproachDistanceToHit(const CaloHit *
     const CartesianVector &hitPosition(pCaloHit->GetPositionVector());
     const CartesianVector positionDifference(hitPosition - clusterPosition);
 
-    if (positionDifference.GetMagnitudeSquared() > m_coneApproachMaxSeparation2)
-        return STATUS_CODE_UNCHANGED;
+    // just a reminder that clusterDirection is determined by the track seeding the cluster. So it is the track position @ ECal face.
+    // std::cout << "hit position is: " << hitPosition << std::endl;
+    // std::cout << "track position @ ECal face is: " << clusterPosition << std::endl;
+    // std::cout << "track radial distance @ ECal face: " << std::sqrt(clusterPosition.GetX()*clusterPosition.GetX() + clusterPosition.GetY()*clusterPosition.GetY()) << std::endl;
+    // std::cout << "position difference between hit and track @ ECal face is: " << positionDifference.GetMagnitudeSquared() << std::endl;
 
+    if (positionDifference.GetMagnitudeSquared() > m_coneApproachMaxSeparation2) { 
+        // std::cout << "GP ERROR: Track (@ ECal face) and hit position very inconsistent!" << std::endl;
+        // std::cout << "position difference between hit and track @ ECal face was: " << positionDifference.GetMagnitudeSquared() << std::endl;
+        return STATUS_CODE_UNCHANGED;
+    }
     const float dAlong(clusterDirection.GetDotProduct(positionDifference));
+
+    // if (dAlong > m_maxClusterDirProjection) {
+    //     std::cout << "GP MESSAGE: dAlong is too large. Perhaps the track and hit are far away..?" << std::endl << "dAlong is: " << dAlong << std::endl;
+    // }
+    // if (dAlong < m_minClusterDirProjection) {
+    //     std::cout << "GP ERROR: Track and hit are in opposite directions. Something might be wrong." << std::endl; 
+    // }
 
     if ((dAlong < m_maxClusterDirProjection) && (dAlong > m_minClusterDirProjection))
     {
@@ -722,12 +796,14 @@ StatusCode ConeClusteringAlgorithm::GetConeApproachDistanceToHit(const CaloHit *
             (std::fabs(dAlong) * m_tanConeAngleFine) + (m_additionalPadWidthsFine * pCaloHit->GetCellLengthScale()) :
             (std::fabs(dAlong) * m_tanConeAngleCoarse) + (m_additionalPadWidthsCoarse * pCaloHit->GetCellLengthScale()) );
 
-        if (dCut < std::numeric_limits<float>::epsilon())
+        if (dCut < std::numeric_limits<float>::epsilon()) {
+            std::cout << "GP ERROR: For some reason, the hit and found track are back-to-back. This shouldn't happen." << std::endl;
             return STATUS_CODE_FAILURE;
-
+        }
         const float dPerp (clusterDirection.GetCrossProduct(positionDifference).GetMagnitude());
 
         distance = dPerp / dCut;
+        // std::cout << "this is the distance calculated: " << distance << std::endl;
         return STATUS_CODE_SUCCESS;
     }
 

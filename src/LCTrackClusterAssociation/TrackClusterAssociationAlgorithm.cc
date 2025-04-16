@@ -41,10 +41,10 @@ namespace lc_content
 {
 
 TrackClusterAssociationAlgorithm::TrackClusterAssociationAlgorithm() :
-    m_lowEnergyCut(0.2f),
-    m_maxTrackClusterDistance(10.f),
-    m_maxSearchLayer(9),
-    m_parallelDistanceCut(100.f),
+    m_lowEnergyCut(0.0f),
+    m_maxTrackClusterDistance(20000.f),
+    m_maxSearchLayer(200),
+    m_parallelDistanceCut(10000.f),
     m_minTrackClusterCosAngle(0.f)
 {
 }
@@ -53,6 +53,7 @@ TrackClusterAssociationAlgorithm::TrackClusterAssociationAlgorithm() :
 
 StatusCode TrackClusterAssociationAlgorithm::Run()
 {
+    std::cout << "Within TrackClusterAssociationAlgorithm! Hopefully only being called once per event. " << std::endl;
     const TrackList *pTrackList = nullptr;
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetCurrentList(*this, pTrackList));
 
@@ -218,6 +219,8 @@ StatusCode TrackClusterAssociationAlgorithm::Run()
         {
             pMatchedCluster = pBestLowEnergyCluster;
         }
+
+        std::cout << "(This is hopefully called once per cluster) Track-cluster distance: " << minDistance << std::endl;        
 
         // Now make the association
         if (nullptr != pMatchedCluster)
