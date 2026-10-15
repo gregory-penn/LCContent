@@ -171,7 +171,7 @@ private:
                                              const pandora::CaloHit* const pCaloHit, float& distance) const;
 
   /**
-   *  @brief  Remove any empty clusters at the end of the algorithm
+   *  @brief  Remove any empty clusters, and any clusters below m_minClusterEnergy, at the end of the algorithm
    *
    *  @param  clusterVector containing the addresses of all clusters created
    */
@@ -259,6 +259,9 @@ private:
   float m_mipTrackChi2Cut; ///< Max value of fit chi2 for track seeded cluster to retain its IsMipTrack status
 
   unsigned int m_firstLayer; ///< cache the pseudo layer at IP
+
+  float m_minClusterEnergy; ///< Clusters with electromagnetic energy (GeV) below this are deleted at the end of Run();
+                            ///< 0 disables the cut
 };
 
 } // namespace lc_content

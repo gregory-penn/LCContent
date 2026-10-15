@@ -30,7 +30,8 @@ ConeClusteringAlgorithm::ConeClusteringAlgorithm()
       m_maxLayersToTrackSeed(3), m_maxLayersToTrackLikeHit(3), m_nLayersSpannedForFit(6),
       m_nLayersSpannedForApproxFit(10), m_nLayersToFit(8), m_nLayersToFitLowMipCut(0.5f),
       m_nLayersToFitLowMipMultiplier(2), m_fitSuccessDotProductCut1(0.75f), m_fitSuccessChi2Cut1(5.0f),
-      m_fitSuccessDotProductCut2(0.50f), m_fitSuccessChi2Cut2(2.5f), m_mipTrackChi2Cut(2.5f), m_firstLayer(1) {}
+      m_fitSuccessDotProductCut2(0.50f), m_fitSuccessChi2Cut2(2.5f), m_mipTrackChi2Cut(2.5f), m_firstLayer(1),
+      m_minClusterEnergy(0.f) {}
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -743,11 +744,13 @@ StatusCode ConeClusteringAlgorithm::GetDistanceToTrackSeed(const Cluster* const 
 StatusCode ConeClusteringAlgorithm::RemoveEmptyClusters(const ClusterVector& clusterVector) const {
   ClusterList clusterDeletionList;
 
-  for (ClusterVector::const_iterator iter = clusterVector.begin(), iterEnd = clusterVector.end(); iter != iterEnd;
-       ++iter) {
-    if (0 == (*iter)->GetNCaloHits()) {
-      clusterDeletionList.push_back(*iter);
-    }
+  for (const Cluster* const pCluster : clusterVector) {
+    const bool isEmpty(0 == pCluster->GetNCaloHits());
+    const bool isBelowEnergyCut((m_minClusterEnergy > 0.f) &&
+                                (pCluster->GetElectromagneticEnergy() < m_minClusterEnergy));
+
+    if (isEmpty || isBelowEnergyCut)
+      clusterDeletionList.push_back(pCluster);
   }
 
   if (!clusterDeletionList.empty()) {
@@ -773,6 +776,9 @@ StatusCode ConeClusteringAlgorithm::ReadSettings(const TiXmlHandle xmlHandle) {
 
   PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
                                   XmlHelper::ReadValue(xmlHandle, "ShouldExcludeBIBHits", m_shouldExcludeBIBHits));
+
+  PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+                                  XmlHelper::ReadValue(xmlHandle, "MinClusterEnergy", m_minClusterEnergy));
 
   PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
                                   XmlHelper::ReadValue(xmlHandle, "LayersToStepBackFine", m_layersToStepBackFine));
