@@ -14,6 +14,10 @@ using namespace pandora;
 
 namespace lc_content {
 
+CheatingTrackToClusterMatching::CheatingTrackToClusterMatching() : m_shouldSkipTracksThatCannotFormPfo(false) {}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode CheatingTrackToClusterMatching::Run() {
   // Read current lists
   const TrackList* pCurrentTrackList = NULL;
@@ -28,11 +32,25 @@ StatusCode CheatingTrackToClusterMatching::Run() {
   // Construct a map from mc particle to tracks
   typedef std::map<const MCParticle*, TrackList> TracksPerMCParticle;
   TracksPerMCParticle tracksPerMCParticle;
+  unsigned int nSkippedTracks(0); // tracks left unassociated by ShouldSkipTracksThatCannotFormPfo
 
   for (TrackList::const_iterator iter = pCurrentTrackList->begin(), iterEnd = pCurrentTrackList->end(); iter != iterEnd;
        ++iter) {
     try {
       const Track* const pTrack = *iter;
+
+      // A track that TrackPreparation will not use for a pfo must not claim a cluster; its cluster then stays
+      // unassociated and PfoCreation can make a neutral pfo from it
+      if (m_shouldSkipTracksThatCannotFormPfo && !pTrack->CanFormPfo() && !pTrack->CanFormClusterlessPfo()) {
+        ++nSkippedTracks;
+
+        if (PandoraContentApi::GetSettings(*this)->ShouldDisplayAlgorithmInfo())
+          std::cout << "CheatingTrackToClusterMatching: track skipped (CanFormPfo 0, CanFormClusterlessPfo 0), p at dca "
+                    << pTrack->GetMomentumAtDca().GetMagnitude() << " GeV" << std::endl;
+
+        continue;
+      }
+
       const MCParticle* const pMCParticle(MCParticleHelper::GetMainMCParticle(pTrack));
 
       TracksPerMCParticle::iterator itTracksPerMCParticle(tracksPerMCParticle.find(pMCParticle));
@@ -114,11 +132,22 @@ StatusCode CheatingTrackToClusterMatching::Run() {
     }
   }
 
+  if (m_shouldSkipTracksThatCannotFormPfo && PandoraContentApi::GetSettings(*this)->ShouldDisplayAlgorithmInfo())
+    std::cout << "CheatingTrackToClusterMatching: " << nSkippedTracks << " of " << pCurrentTrackList->size()
+              << " tracks left unassociated (ShouldSkipTracksThatCannotFormPfo)" << std::endl;
+
   return STATUS_CODE_SUCCESS;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-StatusCode CheatingTrackToClusterMatching::ReadSettings(const TiXmlHandle /*xmlHandle*/) { return STATUS_CODE_SUCCESS; }
+StatusCode CheatingTrackToClusterMatching::ReadSettings(const TiXmlHandle xmlHandle) {
+  // Optional, default false (unchanged behavior when the xml does not set it)
+  PANDORA_RETURN_RESULT_IF_AND_IF(
+      STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+      XmlHelper::ReadValue(xmlHandle, "ShouldSkipTracksThatCannotFormPfo", m_shouldSkipTracksThatCannotFormPfo));
+
+  return STATUS_CODE_SUCCESS;
+}
 
 } // namespace lc_content
